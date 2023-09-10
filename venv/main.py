@@ -17,16 +17,14 @@ class File:
         self.path = file_path
         self.name, self.extension = \
             os.path.splitext(os.path.basename(self.path))
+        self.text = ""
 
 
 def folder_dialog():
-    global FOLDER_PATH
     dir = "C:\\Users\\Seiya\\source\\repos\\document_parser\\sample_docs"
-    FOLDER_PATH = filedialog.askdirectory(parent=root, initialdir=dir)
-    lbl["text"] = FOLDER_PATH
+    folder_path = filedialog.askdirectory(parent=root, initialdir=dir)
+    lbl["text"] = folder_path
 
-
-def get_files(folder_path):
     global FILES
     paths = [os.path.join(folder_path, f) for f in os.listdir(folder_path)]
     file_paths = [p for p in paths if os.path.isfile(p)]
@@ -37,65 +35,66 @@ def get_files(folder_path):
     lbl_files["text"] = body
 
 
-def abort():
-    global running
-    running = False
-    lbl_abort["text"] = "Abort requested"
-
-
-def start_process(files):
-    print("start new thread")
-    t = threading.Thread(target=process(files))
-    t.start()
-
 def process(files):
-    # Set global running
-    global running
-    running = True
-
-    # Progress bar
-    popup = tk.Tk()
-    popup.geometry("250x150+500+500")
-    tk.Label(popup, text="Files being processed").grid(row=0, column=0)
-    progress = 0
-    progress_var = tk.DoubleVar()
-    progress_bar = ttk.Progressbar(popup, variable=progress_var, maximum=100)
-    progress_bar.grid(row=1, column=0)
-    popup.pack_slaves()
-    progress_step = float(100.0/len(files))
-
-    for f in files[:5]:
-        popup.update()
-        if not running:
-            break
+    lbl_thread["text"] = "Thread running"
+    for f in files:
+        if abort:
+            lbl_thread["text"] = "Process aborted"
+            btn_process["state"] = "active"
+            btn_abort["state"] = "disabled"
+            return
         if f.extension == ".pdf":
             # Convert to png images (if not already)
             images = convert_from_path(f.path)
 
-            # Save as temp file
-            temp_paths = []
+            # Process image
+            text = ""
             for i in range(len(images)):
+                if abort:
+                    lbl_thread["text"] = "Process aborted"
+                    btn_process["state"] = "active"
+                    btn_abort["state"] = "disabled"
+                    return
+                # Save image
                 temp_path = "temp\\page_" + str(i) + ".jpg"
                 images[i].save(temp_path, "JPEG")
-                temp_paths.append(temp_path)
-            
-            # Convert image to text
-            for p in temp_paths:
-                """
-                print("Processing...", p)
-                image = Image.open(p)
+
+                # Convert image
+                print("Processing...", temp_path)
+                image = Image.open(temp_path)
                 #image = image.resize((300,150))
                 custom_config = r'-l eng --oem 3 --psm 6' 
-                text = pt.image_to_string(image, config=custom_config)
-                print(text)"""
+                text += pt.image_to_string(image, config=custom_config)
 
-                # Delete temp file
-                os.remove(p)
-        progress += progress_step
-        progress_var.set(progress)
+                # Delete image
+                os.remove(temp_path)
+            
+            # Assign text to file
+            f.text = text
+            print("Text count: ", len(text))
 
-    popup.destroy()
+    lbl_thread["text"] = "Process finished"
+    btn_process["state"] = "active"
+    btn_abort["state"] = "disabled"
+    return
 
+
+def start_process(files):
+    global abort
+    abort = False
+    new_thread = threading.Thread(target=process, args=(files,))
+    new_thread.start()
+    btn_abort["state"] = "active"
+    btn_process["state"] = "disabled"
+    
+
+def abort_process():
+    global abort
+    abort = True
+    lbl_thread["text"] = "Abort requested..."
+    
+def donothing():
+   x = 0
 
 if __name__ == "__main__":
     # Setup root
@@ -111,6 +110,22 @@ if __name__ == "__main__":
     root.resizable(False, False)
     root.iconbitmap("assets\\root_icon.ico")
 
+    menubar = tk.Menu(root)
+    filemenu = tk.Menu(menubar, tearoff=0)
+    filemenu.add_command(label="New", command=donothing)
+    filemenu.add_command(label="Open", command=donothing)
+    filemenu.add_command(label="Save", command=donothing)
+    filemenu.add_separator()
+    filemenu.add_command(label="Exit", command=root.quit)
+    menubar.add_cascade(label="File", menu=filemenu)
+
+    helpmenu = tk.Menu(menubar, tearoff=0)
+    helpmenu.add_command(label="Help Index", command=donothing)
+    helpmenu.add_command(label="About...", command=donothing)
+    menubar.add_cascade(label="Help", menu=helpmenu)
+
+    root.config(menu=menubar)
+
     # Folder dialog button
     btn_get_folder = tk.Button(
         root, text="Select folder", command=lambda: folder_dialog())
@@ -119,11 +134,6 @@ if __name__ == "__main__":
     # Folder path label
     lbl = tk.Label(root, text="No folder selected yet")
     lbl.pack()
-
-    # Get files in folder button
-    btn_get_files = tk.Button(
-        root, text="Get files", command=lambda: get_files(FOLDER_PATH))
-    btn_get_files.pack()
 
     # Found files label
     lbl_files = tk.Label(root, text="", justify=LEFT)
@@ -134,12 +144,14 @@ if __name__ == "__main__":
         root, text="Start", command=lambda: start_process(FILES))
     btn_process.pack()
 
-    # Cancel button
-    btn_cancel = tk.Button(root, text="Abort", command=lambda: abort()).pack()
+    # Abort process button
+    btn_abort = tk.Button(
+        root, text="Abort", state="disabled" , command=lambda: abort_process())
+    btn_abort.pack()
 
-    # Found files label
-    lbl_abort = tk.Label(root, text="")
-    lbl_abort.pack()
+    # Thread status label
+    lbl_thread = tk.Label(root, text="No status")
+    lbl_thread.pack()
 
     # Show root
     root.mainloop()
